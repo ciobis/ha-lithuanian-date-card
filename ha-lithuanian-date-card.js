@@ -573,95 +573,117 @@ class LithuanianDateCard extends HTMLElement {
   }
 }
 
+// Vizualinis konfigūracijos redaktorius, naudojamas Lovelace „Add Card" sraute.
+// Sąmoningai naudojami tiesioginiai HA komponentai (ha-entity-picker, ha-select),
+// o ne ha-form, kad redaktorius būtų stabilus įvairiose HA versijose ir
+// vartotojas galėtų pridėti kortelę per UI be rankinio YAML redagavimo.
 class LithuanianDateCardEditor extends HTMLElement {
   setConfig(config) {
-    this._config = Object.assign({}, config || {});
-    this._render();
+    this._config = Object.assign({
+      entity: 'sensor.daylt_info',
+      theme: LithuanianDateCard.DEFAULT_THEME
+    }, config || {});
+
+    if (!this._rendered) {
+      this._render();
+    } else {
+      this._syncFromConfig();
+    }
   }
 
   set hass(hass) {
     this._hass = hass;
-    if (this._form) {
-      this._form.hass = hass;
+    if (this._entityPicker) {
+      this._entityPicker.hass = hass;
     }
-  }
-
-  // Konfigūracijos reikšmės su numatytaisiais pakaitalais, kad ha-form
-  // tinkamai parodytų pasirinkimus, net jei vartotojo YAML jų neturi
-  _normalizedData() {
-    return {
-      entity: this._config.entity || 'sensor.daylt_info',
-      theme: this._config.theme || LithuanianDateCard.DEFAULT_THEME
-    };
-  }
-
-  _schema() {
-    const themeOptions = Object.keys(LithuanianDateCard.THEMES).map((key) => ({
-      value: key,
-      label: LithuanianDateCard.THEMES[key].label
-    }));
-
-    return [
-      {
-        name: 'entity',
-        required: true,
-        selector: { entity: { domain: 'sensor' } }
-      },
-      {
-        name: 'theme',
-        selector: {
-          select: {
-            mode: 'dropdown',
-            options: themeOptions
-          }
-        }
-      }
-    ];
-  }
-
-  _computeLabel(schema) {
-    const labels = {
-      entity: 'Esybė',
-      theme: 'Išvaizda'
-    };
-    return labels[schema.name] || schema.name;
   }
 
   _render() {
-    if (!this._config) return;
+    const themeOptions = Object.keys(LithuanianDateCard.THEMES)
+      .map((key) => `<mwc-list-item value="${key}">${LithuanianDateCard.THEMES[key].label}</mwc-list-item>`)
+      .join('');
 
-    if (this._form) {
-      this._form.data = this._normalizedData();
-      return;
+    this.innerHTML = `
+      <style>
+        .lt-card-editor {
+          display: flex;
+          flex-direction: column;
+          gap: 16px;
+          padding: 8px 4px;
+        }
+        .lt-card-editor ha-entity-picker,
+        .lt-card-editor ha-select {
+          width: 100%;
+        }
+      </style>
+      <div class="lt-card-editor">
+        <ha-entity-picker class="lt-entity" allow-custom-entity></ha-entity-picker>
+        <ha-select class="lt-theme" label="Išvaizda" fixedMenuPosition naturalMenuWidth>
+          ${themeOptions}
+        </ha-select>
+      </div>
+    `;
+
+    this._entityPicker = this.querySelector('.lt-entity');
+    this._themeSelect = this.querySelector('.lt-theme');
+
+    this._entityPicker.label = 'Esybė';
+    this._entityPicker.includeDomains = ['sensor'];
+    if (this._hass) {
+      this._entityPicker.hass = this._hass;
     }
 
-    this.innerHTML = '';
-    const form = document.createElement('ha-form');
-    form.hass = this._hass;
-    form.data = this._normalizedData();
-    form.schema = this._schema();
-    form.computeLabel = this._computeLabel;
-    form.addEventListener('value-changed', (ev) => {
+    this._entityPicker.addEventListener('value-changed', (ev) => {
       ev.stopPropagation();
-      const newConfig = Object.assign({}, this._config, ev.detail.value);
-      this._config = newConfig;
-      this.dispatchEvent(new CustomEvent('config-changed', {
-        detail: { config: newConfig },
-        bubbles: true,
-        composed: true
-      }));
+      this._handleChange('entity', ev.detail.value);
     });
-    this.appendChild(form);
-    this._form = form;
+
+    // ha-select uždaromas po pasirinkimo - šiame etape jo .value jau atnaujinta
+    this._themeSelect.addEventListener('closed', (ev) => {
+      ev.stopPropagation();
+      const value = this._themeSelect.value;
+      if (value) {
+        this._handleChange('theme', value);
+      }
+    });
+
+    this._syncFromConfig();
+    this._rendered = true;
+  }
+
+  _syncFromConfig() {
+    if (this._entityPicker && this._entityPicker.value !== this._config.entity) {
+      this._entityPicker.value = this._config.entity || '';
+    }
+    if (this._themeSelect && this._themeSelect.value !== this._config.theme) {
+      this._themeSelect.value = this._config.theme || LithuanianDateCard.DEFAULT_THEME;
+    }
+  }
+
+  _handleChange(key, value) {
+    if (value === undefined || this._config[key] === value) return;
+    const newConfig = Object.assign({}, this._config, { [key]: value });
+    this._config = newConfig;
+    this.dispatchEvent(new CustomEvent('config-changed', {
+      detail: { config: newConfig },
+      bubbles: true,
+      composed: true
+    }));
   }
 }
 
-customElements.define('ha-lithuanian-date-card-editor', LithuanianDateCardEditor);
-customElements.define('ha-lithuanian-date-card', LithuanianDateCard);
+if (!customElements.get('ha-lithuanian-date-card-editor')) {
+  customElements.define('ha-lithuanian-date-card-editor', LithuanianDateCardEditor);
+}
+if (!customElements.get('ha-lithuanian-date-card')) {
+  customElements.define('ha-lithuanian-date-card', LithuanianDateCard);
+}
 
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: "ha-lithuanian-date-card",
   name: "Lithuanian Date Card",
-  description: "A card that displays Lithuanian calendar information"
+  description: "A card that displays Lithuanian calendar information",
+  preview: true,
+  documentationURL: "https://github.com/braticks/ha-lithuanian-date-card"
 });
